@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="hy">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0b3428"><meta name="description" content="Ստեղծիր Secret Santa խաղ, հրավիրիր ընկերներիդ և կատարիր գաղտնի վիճակահանություն։">
+  <title>Secret Santa — Ստեղծիր խաղ</title><link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="snow" aria-hidden="true"></div>
+<header class="top"><div class="logo">🎄 <span>Secret Santa</span> 🎅</div><div class="subtitle">Գաղտնի նվերներ · Սուրբ Ծննդյան կախարդանք</div></header>
+<main>
+  <section class="hero"><div class="tree" aria-hidden="true">🎄</div><div class="copy"><div class="eyebrow">ԳԱՂՏՆԻ ՆՎԵՐՆԵՐԻ ԽԱՂ</div><h1>Մի փոքր կախարդանք<br><span>մեծ ժպիտի համար</span></h1><p class="lead">Ստեղծիր քո խաղը, ուղարկիր հրավերի հղումը ընկերներիդ, և բոլորդ միացեք նույն խաղին՝ տարբեր հեռախոսներից։</p></div></section>
+  <section class="card">
+    <h2>Սկսենք խաղը ✨</h2><p class="muted">Ստեղծիր նոր խաղ կամ միացիր ընկերոջդ ստեղծած խաղին։</p>
+    <div class="tabs"><button class="tab active" type="button" data-tab="create">Ստեղծել խաղ</button><button class="tab" type="button" data-tab="join">Միանալ խաղին</button></div>
+    <form class="form" id="createForm" novalidate>
+      <label>Խաղի անունը<input id="title" maxlength="60" autocomplete="off" placeholder="Մեր ընկերների Secret Santa" required></label>
+      <label>Քո անունը<input id="createName" maxlength="50" autocomplete="name" placeholder="Գրիր անունդ" required></label>
+      <button class="btn primary" type="submit">🎄 Ստեղծել խաղը</button>
+    </form>
+    <form class="form hidden" id="joinForm" novalidate>
+      <label>Քո անունը<input id="joinName" maxlength="50" autocomplete="name" placeholder="Գրիր անունդ" required></label>
+      <label>Հրավերի կոդը<input id="code" maxlength="10" autocapitalize="characters" autocomplete="off" placeholder="Օրինակ՝ A1B2C3D4" required></label>
+      <button class="btn primary" type="submit">🎁 Միանալ խաղին</button>
+    </form>
+    <p class="hint" id="setupHint">Առաջին անգամ կայքը պետք է միացված լինի Supabase տվյալների բազային։</p>
+  </section>
+  <section class="card"><h2>Ինչպե՞ս է խաղում</h2><p class="muted">1. Կազմակերպիչը ստեղծում է խաղը։ 2. Կիսվում է հրավերի հղումով կամ կոդով։ 3. Ընկերները միանում են իրենց սարքերից։ 4. Կազմակերպիչը սկսում է վիճակահանությունը։ 5. Յուրաքանչյուրը բացահայտում է միայն իր ստացած անունը։</p></section>
+</main>
+<footer>Ստեղծված է ❤️ և Սուրբ Ծննդյան կախարդանքով</footer><div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script type="module">
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './assets/config.js';
+const $ = id => document.getElementById(id);
+let supabase = null, toastTimer = null;
+function toast(message) { $('toast').textContent = message; $('toast').classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => $('toast').classList.remove('show'), 4500); }
+function getClient() {
+  if (!SUPABASE_URL.startsWith('https://') || SUPABASE_URL.includes('PASTE_') || !SUPABASE_ANON_KEY || SUPABASE_ANON_KEY.includes('PASTE_')) {
+    throw new Error('Կայքը դեռ միացված չէ տվյալների բազային։ Բացիր assets/config.js-ը և լրացրու Supabase Project URL-ն ու public anon key-ը։');
+  }
+  if (!supabase) supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false } });
+  return supabase;
+}
+async function ensureSession() {
+  const client = getClient();
+  const { data, error } = await client.auth.getSession();
+  if (error) throw error;
+  if (!data.session) {
+    const { error: signInError } = await client.auth.signInAnonymously();
+    if (signInError) {
+      if (/anonymous|disabled|not enabled/i.test(signInError.message)) throw new Error('Supabase-ում միացրու Authentication → Sign In / Providers → Anonymous Sign-Ins տարբերակը։');
+      throw signInError;
+    }
+  }
+  return client;
+}
+function clean(value) { return String(value ?? '').trim().replace(/\s+/g, ' '); }
+function setBusy(form, busy) { form.classList.toggle('loading', busy); form.querySelector('button[type="submit"]').disabled = busy; }
+function friendlyError(error) {
+  const message = error?.message || String(error || 'Անհայտ սխալ');
+  if (/Failed to fetch|NetworkError|fetch failed/i.test(message)) return 'Չհաջողվեց կապ հաստատել սերվերի հետ։ Ստուգիր ինտերնետը և Supabase Project URL-ը։';
+  if (/Invalid API key/i.test(message)) return 'Supabase public key-ը սխալ է։ Ստուգիր assets/config.js ֆայլը։';
+  if (/schema cache|function .* does not exist|could not find the function/i.test(message)) return 'Տվյալների բազայի ֆունկցիաները դեռ տեղադրված չեն։ Supabase SQL Editor-ում գործարկիր supabase/schema.sql ֆայլը։';
+  return message;
+}
+document.querySelectorAll('[data-tab]').forEach(button => button.addEventListener('click', () => {
+  document.querySelectorAll('.tab').forEach(tab => tab.classList.toggle('active', tab === button));
+  $('createForm').classList.toggle('hidden', button.dataset.tab !== 'create');
+  $('joinForm').classList.toggle('hidden', button.dataset.tab !== 'join');
+}));
+async function submit(form, action) {
+  setBusy(form, true);
+  try {
+    const client = await ensureSession();
+    const result = await action(client);
+    if (!result || !result.code) throw new Error('Սերվերը խաղի կոդ չվերադարձրեց։ Կրկին փորձիր։');
+    const destination = new URL('game.html', location.href);
+    destination.searchParams.set('code', result.code);
+    location.assign(destination.href);
+  } catch (error) { toast(friendlyError(error)); setBusy(form, false); }
+}
+$('createForm').addEventListener('submit', event => {
+  event.preventDefault();
+  const title = clean($('title').value), name = clean($('createName').value);
+  if (!title || !name) return toast('Լրացրու խաղի անունը և քո անունը։');
+  submit(event.currentTarget, async client => {
+    const { data, error } = await client.rpc('ss_create_group', { p_title: title, p_name: name });
+    if (error) throw error;
+    return data;
+  });
+});
+$('joinForm').addEventListener('submit', event => {
+  event.preventDefault();
+  const name = clean($('joinName').value), code = clean($('code').value).toUpperCase().replace(/\s/g, '');
+  if (!name || !code) return toast('Լրացրու անունդ և հրավերի կոդը։');
+  submit(event.currentTarget, async client => {
+    const { data, error } = await client.rpc('ss_join_group', { p_code: code, p_name: name });
+    if (error) throw error;
+    return data;
+  });
+});
+const inviteCode = new URLSearchParams(location.search).get('join');
+if (inviteCode) { $('code').value = inviteCode.toUpperCase(); document.querySelector('[data-tab="join"]').click(); }
+</script>
+</body></html>

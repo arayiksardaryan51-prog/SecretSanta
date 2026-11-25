@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="hy">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0b3428"><title>Secret Santa — Խաղի սենյակ</title><link rel="stylesheet" href="assets/style.css">
+<style>
+.gamehead{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.invite{display:grid;grid-template-columns:1fr auto;align-items:center;gap:12px;background:#f1f6ef;border:1px dashed #b7cbb7;padding:15px;border-radius:15px;margin:20px 0}.invite small{font-size:11px;color:#6c8172}.invite p{margin:5px 0 0;font-size:13px;font-weight:700;word-break:break-all;color:var(--text)}.code-line{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:8px}.code-value{font-size:18px;letter-spacing:2px;font-weight:900;color:#a52b34}.organizer{border-top:1px solid #e5ece2;padding-top:18px;margin-top:18px}.people{display:flex;flex-wrap:wrap;gap:7px;list-style:none;padding:0;margin:12px 0 18px}.people li{background:#eef3e9;border-radius:99px;padding:7px 11px;font-size:12px;color:var(--text)}.revealbox{text-align:center;background:#fff8e9;border:1px solid #f3dfb5;border-radius:18px;padding:24px;margin-top:20px;color:var(--text)}.result{display:grid;gap:8px;margin:18px auto 0;padding:18px;background:white;border-radius:14px;max-width:360px}.result strong{font-size:28px;color:#a52b34}.back{margin-top:18px;background:none;border:0;color:#61796b;font:inherit;font-size:12px;cursor:pointer}.actions{display:flex;gap:8px;flex-wrap:wrap}.statusline{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.refresh-note{font-size:11px;color:#718276;margin-top:8px}
+@media(max-width:650px){.invite{grid-template-columns:1fr}.invite .btn{width:100%}}
+</style></head>
+<body><div class="snow" aria-hidden="true"></div><header class="top"><div class="logo">🎄 <span>Secret Santa</span> 🎅</div><div class="subtitle">Քո խաղի սենյակը</div></header>
+<main>
+<section class="card" id="loading"><h2>Բացվում է խաղը…</h2><p class="muted">Մի փոքր սպասիր։</p></section>
+<section class="card hidden" id="room">
+  <div class="gamehead"><div><div class="eyebrow">ՔՈ SECRET SANTA ԽԱՂԸ</div><h2 id="gameTitle">Խաղ</h2></div><span class="pill" id="status">Գրանցում</span></div>
+  <div class="invite"><div><small>Հրավերի հղում</small><p id="inviteLink"></p><div class="code-line"><span class="muted">Խաղի կոդը՝</span><span class="code-value" id="gameCode"></span></div></div><div class="actions"><button type="button" class="btn soft" id="copyLink">Պատճենել հղումը</button><button type="button" class="btn soft" id="shareLink">Կիսվել</button></div></div>
+  <div class="organizer hidden" id="organizer"><h3>Կազմակերպչի վահանակ</h3><p class="muted">Միացած մասնակիցներ՝ <b id="count">0</b></p><ul class="people" id="people"></ul><button type="button" class="btn primary" id="draw">🎲 Սկսել վիճակահանությունը</button><p class="hint">Վիճակահանությունը սկսիր, երբ բոլորը միացած լինեն։ Այն կատարվում է մեկ անգամ և հետարկել հնարավոր չէ։</p></div>
+  <div class="revealbox"><h3>🎁 Քո գաղտնի նվերը</h3><p class="muted" id="revealText">Վիճակահանությունը դեռ չի սկսվել։</p><button type="button" class="btn gold" id="reveal" disabled>Բացահայտել իմ Secret Santa-ին</button><div class="result hidden" id="result"><span>Դու նվեր ես պատրաստելու՝</span><strong id="assigned">Անուն</strong><small>Պահիր գաղտնիքը 🤫</small></div></div>
+  <p class="refresh-note" id="refreshNote">Մասնակիցների ցուցակը ինքնաշխատ թարմացվում է։</p><button type="button" class="back" id="home">← Գլխավոր էջ</button>
+</section>
+<section class="card hidden" id="error"><h2>Չհաջողվեց բացել խաղը</h2><p class="muted" id="errorText"></p><a class="btn primary" href="index.html" style="display:inline-block;text-decoration:none">Վերադառնալ գլխավոր էջ</a></section>
+</main><footer>Ստեղծված է ❤️ և Սուրբ Ծննդյան կախարդանքով</footer><div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script type="module">
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './assets/config.js';
+const $ = id => document.getElementById(id);
+let supabase = null, gameCode = '', pollTimer = null, toastTimer = null, refreshBusy = false, isOrganizer = false;
+function toast(message) { $('toast').textContent = message; $('toast').classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => $('toast').classList.remove('show'), 4200); }
+function getClient() {
+  if (!SUPABASE_URL.startsWith('https://') || SUPABASE_URL.includes('PASTE_') || !SUPABASE_ANON_KEY || SUPABASE_ANON_KEY.includes('PASTE_')) throw new Error('Supabase-ը կարգավորված չէ։ Լրացրու assets/config.js ֆայլը։');
+  if (!supabase) supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false } });
+  return supabase;
+}
+async function ensureSession() {
+  const client = getClient();
+  const { data, error } = await client.auth.getSession(); if (error) throw error;
+  if (!data.session) { const { error: signInError } = await client.auth.signInAnonymously(); if (signInError) throw signInError; }
+  return client;
+}
+async function callRpc(name, args) { const { data, error } = await getClient().rpc(name, args); if (error) throw error; return data; }
+function friendlyError(error) {
+  const m = error?.message || String(error || 'Անհայտ սխալ');
+  if (/Failed to fetch|NetworkError|fetch failed/i.test(m)) return 'Սերվերի հետ կապը խափանվեց։ Ստուգիր ինտերնետը։';
+  if (/Invalid API key/i.test(m)) return 'Supabase public key-ը սխալ է։ Ստուգիր assets/config.js-ը։';
+  if (/schema cache|function .* does not exist|could not find the function/i.test(m)) return 'Supabase SQL կարգավորումը բացակայում է։ Գործարկիր supabase/schema.sql-ը։';
+  return m;
+}
+function showError(error) { clearInterval(pollTimer); $('loading').classList.add('hidden'); $('room').classList.add('hidden'); $('error').classList.remove('hidden'); $('errorText').textContent = friendlyError(error); }
+function renderPeople(list) { const ul = $('people'); ul.replaceChildren(); for (const person of list) { const li = document.createElement('li'); li.textContent = person.name; ul.append(li); } }
+async function refreshRoom(showToast = false) {
+  if (refreshBusy) return; refreshBusy = true;
+  try {
+    const data = await callRpc('ss_dashboard', { p_code: gameCode });
+    $('gameTitle').textContent = data.title;
+    $('status').textContent = data.drawn ? 'Վիճակահանությունն ավարտված է' : 'Մասնակիցների գրանցում';
+    $('count').textContent = data.participants.length;
+    renderPeople(data.participants);
+    $('draw').disabled = data.drawn || data.participants.length < 2;
+    $('draw').textContent = data.drawn ? 'Վիճակահանությունն արդեն կատարվել է' : '🎲 Սկսել վիճակահանությունը';
+    $('reveal').disabled = !data.drawn;
+    $('revealText').textContent = data.drawn ? 'Վիճակահանությունը պատրաստ է։ Բացահայտիր քո անունը։' : 'Սպասիր, մինչև կազմակերպիչը սկսի վիճակահանությունը։';
+    if (showToast) toast('Մասնակիցների ցուցակը թարմացվեց։');
+  } catch (error) { $('refreshNote').textContent = 'Թարմացումը չհաջողվեց․ ' + friendlyError(error); if (showToast) toast(friendlyError(error)); }
+  finally { refreshBusy = false; }
+}
+async function init() {
+  try {
+    gameCode = (new URLSearchParams(location.search).get('code') || '').trim().toUpperCase();
+    if (!/^[A-F0-9]{10}$/.test(gameCode)) throw new Error('Հրավերի կոդը բացակայում է կամ սխալ է։ Վերադարձիր գլխավոր էջ։');
+    await ensureSession();
+    const initial = await callRpc('ss_dashboard', { p_code: gameCode });
+    isOrganizer = Boolean(initial.is_organizer);
+    const invite = new URL('index.html', location.href); invite.searchParams.set('join', gameCode);
+    $('inviteLink').textContent = invite.href; $('gameCode').textContent = gameCode;
+    $('organizer').classList.toggle('hidden', !isOrganizer);
+    $('loading').classList.add('hidden'); $('room').classList.remove('hidden');
+    await refreshRoom(); pollTimer = setInterval(() => refreshRoom(false), 4000);
+  } catch (error) { showError(error); }
+}
+async function copyText(value) {
+  try { await navigator.clipboard.writeText(value); toast('Պատճենվեց։ Կարող ես ուղարկել ընկերներիդ։'); }
+  catch { toast('Պատճենումը չհաջողվեց։ Նշիր և պատճենիր հղումը ձեռքով։'); }
+}
+$('copyLink').addEventListener('click', () => copyText($('inviteLink').textContent));
+$('shareLink').addEventListener('click', async () => {
+  const payload = { title: 'Secret Santa', text: 'Միացի՛ր մեր Secret Santa խաղին։', url: $('inviteLink').textContent };
+  if (navigator.share) { try { await navigator.share(payload); } catch (error) { if (error.name !== 'AbortError') toast('Չհաջողվեց կիսվել հղումով։'); } }
+  else copyText(payload.url);
+});
+$('draw').addEventListener('click', async () => {
+  if (!confirm('Սկսե՞լ վիճակահանությունը։ Համոզվիր, որ բոլոր մասնակիցները միացել են։ Այն հնարավոր չէ հետարկել։')) return;
+  const button = $('draw'); button.disabled = true;
+  try { await callRpc('ss_start_draw', { p_code: gameCode }); await refreshRoom(); toast('Վիճակահանությունը հաջողությամբ կատարվեց 🎉'); }
+  catch (error) { toast(friendlyError(error)); await refreshRoom(); }
+});
+$('reveal').addEventListener('click', async () => {
+  const button = $('reveal'); button.disabled = true;
+  try { const data = await callRpc('ss_reveal', { p_code: gameCode }); $('assigned').textContent = data.name; $('result').classList.remove('hidden'); $('revealText').textContent = 'Քո գաղտնի անունը բացահայտված է։'; }
+  catch (error) { toast(friendlyError(error)); button.disabled = false; }
+});
+$('home').addEventListener('click', () => { clearInterval(pollTimer); location.href = 'index.html'; });
+window.addEventListener('beforeunload', () => clearInterval(pollTimer));
+init();
+</script></body></html>
